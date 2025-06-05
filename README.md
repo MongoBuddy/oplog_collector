@@ -23,12 +23,12 @@ The core components included in this repository are:
 ### **2.1. Web UI (`index.html` \+ `app.py`)**
 
 * **Source Cluster Registration**:  
-    <img width="1554" alt="image" src="https://github.com/user-attachments/assets/b3592794-35e9-4f1d-863c-52e7680d6881" />
+![image](https://github.com/user-attachments/assets/ee865744-7d09-4bd8-b90e-7182359d1387)
 
   * Register new MongoDB source clusters via the Web UI, specifying a display name, connection URI, the URI for the Oplog Data Store, and an optional specific database to monitor.  
   * Automatically starts an Oplog Collector process for each newly registered cluster.  
 * **Oplog Collector Monitoring & Management**:  
-  <img width="1535" alt="image" src="https://github.com/user-attachments/assets/08e08a88-0362-4e5d-aab4-d056db1ab68a" />
+![image](https://github.com/user-attachments/assets/ef8a32f9-4378-456e-b104-7ce5dd55ff6c)
 
   * View a list of registered clusters and the real-time status of their Oplog Collectors (e.g., starting, running, stopped, retrying connection, error).  
   * Display key metrics for each collector: First Oplog Time (earliest oplog in its store, reported by collector), Last Collected Oplog Time, and the current time GAP (lag).  
