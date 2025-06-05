@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MongoDB Oplog Management Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; 
+        }
+        .container {
+            max-width: 1200px; 
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .btn {
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+        }
+        .btn-sm { 
+            padding: 6px 10px;
+            font-size: 0.875rem; 
+        }
+        .btn {
+            background-color: white;
+            color: #1f2937; 
+            border: 1px solid #6b7280; 
+        }
+        .btn:hover {
+            background-color: #f9fafb; 
+            border-color: #374151; 
+        }
+        .btn:disabled {
+            background-color: #e5e7eb;
+            color: #9ca3af;
+            border-color: #d1d5db;
+            cursor: not-allowed;
+        }
+        .btn svg {
+            margin-right: 6px;
+            width: 1em; 
+            height: 1em;
+            fill: currentColor; 
+        }
+        #registerClusterForm button[type="submit"] { /* Keep primary style for main registration button */
+            background-color: #3b82f6; 
+            color: white;
+            border-color: #3b82f6;
+        }
+        #registerClusterForm button[type="submit"]:hover {
+            background-color: #2563eb; 
+            border-color: #2563eb;
+        }
+
+
+        .input-field {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db; 
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; flex-shrink: 0; }
+        .status-running, .status-app-managed-running, .status-running-basic-check, .status-running-orphaned { background-color: #22c55e; }
+        .status-stopped, .status-stopped-orphaned, .status-error-or-stopped-unexpectedly, .status-stopped_or_not_managed { background-color: #ef4444; }
+        .status-pending-registration, .status-starting, .status-stopping, .status-resetting-oplog-store, .status-retrying-connection { background-color: #f59e0b; }
+        .status-error, .status-error_orphaned_terminated, .status-error-max-retries-reached, .status-error-resume-token-lost { background-color: #ef4444; }
+        
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 18px; height: 18px; animation: spin 1s linear infinite; display: inline-block; margin-left: 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .message-box { position: fixed; top: 20px; right: 20px; padding: 15px; border-radius: 8px; color: white; z-index: 1000; opacity: 0; transition: opacity 0.5s ease-in-out; min-width: 250px; text-align: center; }
+        .message-box.success { background-color: #22c55e; }
+        .message-box.error { background-color: #ef4444; }
+        .message-box.info { background-color: #3b82f6; }
+        .message-box.show { opacity: 1; }
+        table { width: 100%; border-collapse: collapse; table-layout: auto; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb; word-break: break-all; }
+        th { background-color: #f9fafb; }
+        .error-message-summary { display: block; font-weight: 500; }
+        .status-cell { word-break: break-word; }
+        .actions-cell button { margin-right: 4px; margin-bottom: 4px; }
+        .gap-warning { background-color: #fef3c7; color: #b45309; } 
+        .gap-critical { background-color: #fee2e2; color: #b91c1c; } 
+        .header-current-time { text-align: right; font-size: 0.75rem; color: #6b7280; padding-bottom: 5px; }
+
+        /* Tab Styles */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #d1d5db; 
+            margin-bottom: 20px;
+        }
+        .tab-button {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background-color: transparent;
+            font-size: 1rem;
+            font-weight: 500;
+            color: #6b7280; 
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px; 
+        }
+        .tab-button.active {
+            color: #3b82f6; 
+            border-bottom-color: #3b82f6;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-gray-800">MongoDB Oplog Management Dashboard</h1>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab(event, 'statusTab')">Registered Clusters & Oplog Status</button>
+            <button class="tab-button" onclick="openTab(event, 'registerTab')">Register New Source Cluster</button>
+        </div>
+
+        <div id="statusTab" class="tab-content active">
+            <div class="card" id="registered-clusters-card">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-700">Cluster Status List</h2>
+                    <div id="global-current-time-container" class="header-current-time">
+                        Current Time (UTC): <span id="global-current-time">N/A</span>
+                    </div>
+                </div>
+                <div id="registeredClustersTableContainer">
+                    <p class="text-gray-500" id="noClustersMessage">No registered clusters found. Please register a new cluster in the "Register New Source Cluster" tab.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="registerTab" class="tab-content">
+            <div class="card" id="cluster-registration-card">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700">Register New Source Cluster</h2>
+                <form id="registerClusterForm">
+                    <div class="mb-4">
+                        <label for="clusterName" class="block text-sm font-medium text-gray-700 mb-1">Cluster Name (for UI display):</label>
+                        <input type="text" id="clusterName" name="clusterName" class="input-field" placeholder="e.g., my-prod-cluster" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="connectionString" class="block text-sm font-medium text-gray-700 mb-1">Source MongoDB Connection String:</label>
+                        <input type="text" id="connectionString" name="connectionString" class="input-field" placeholder="mongodb://user:pass@host:port/db" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="oplogTargetStoreUri" class="block text-sm font-medium text-gray-700 mb-1">Oplog Data Store URI:</label>
+                        <input type="text" id="oplogTargetStoreUri" name="oplogTargetStoreUri" class="input-field" placeholder="mongodb://user:pass@oplog-store-host:port/oplogDB" required>
+                        <p class="text-xs text-gray-500 mt-1">MongoDB URI where collected Oplog data and Collector's Resume Token will be stored.</p>
+                    </div>
+                     <div class="mb-4">
+                        <label for="changeStreamTargetDb" class="block text-sm font-medium text-gray-700 mb-1">Watch Specific DB Only (Optional):</label>
+                        <input type="text" id="changeStreamTargetDb" name="changeStreamTargetDb" class="input-field" placeholder="e.g., specificAppDB (leave blank for entire cluster)">
+                    </div>
+                    <button type="submit" class="btn btn-primary"> 
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" /></svg>
+                        Register Cluster & Start Collector
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="messageBoxContainer"></div>
+
+    <script>
+        let DEBUG_MODE = false; 
+        // To enable debug logs, open browser console and type: window.DEBUG_MODE = true; then refresh.
+
+        const API_BASE_URL = 'http://127.0.0.1:4999/api';
+
+        const registerClusterFormEl = document.getElementById('registerClusterForm');
+        const registeredClustersTableContainerEl = document.getElementById('registeredClustersTableContainer');
+        const noClustersMessageEl = document.getElementById('noClustersMessage');
+        const messageBoxContainerEl = document.getElementById('messageBoxContainer');
+        const globalCurrentTimeEl = document.getElementById('global-current-time');
+
+        function openTab(event, tabName) {
+            if (DEBUG_MODE) console.log(`DEBUG: openTab called for: ${tabName}`);
+            let i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+                tabcontent[i].classList.remove("active");
+            }
+            tablinks = document.getElementsByClassName("tab-button");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].classList.remove("active");
+            }
+            const targetTab = document.getElementById(tabName);
+            if (targetTab) {
+                targetTab.style.display = "block";
+                targetTab.classList.add("active");
+            }
+            if (event && event.currentTarget) {
+                event.currentTarget.classList.add("active");
+            }
+        }
+
+        function showToast(message, type = 'info', duration = 4000) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message-box ${type}`;
+            messageDiv.textContent = message;
+            messageBoxContainerEl.appendChild(messageDiv);
+            requestAnimationFrame(() => { messageDiv.classList.add('show'); });
+            setTimeout(() => {
+                messageDiv.classList.remove('show');
+                setTimeout(() => messageDiv.remove(), 500);
+            }, duration);
+        }
+
+        function createButtonLoader(button) { 
+            const loader = document.createElement('div');
+            loader.className = 'loader';
+            button.appendChild(loader); // Appends loader after existing content (icon + text)
+            button.disabled = true;
+            return loader;
+        }
+
+        function removeButtonLoader(button, loader, originalHTML) { // Pass originalHTML
+            if (loader) loader.remove();
+            button.disabled = false;
+            if (originalHTML) { // Restore original HTML content (icon + text)
+                button.innerHTML = originalHTML;
+            }
+        }
+        
+        function formatDateTime(isoString, includeTime = true) {
+            if (DEBUG_MODE) console.log("DEBUG: formatDateTime called with:", isoString, "includeTime:", includeTime); 
+            if (!isoString) {
+                if (DEBUG_MODE) console.log("DEBUG: formatDateTime: isoString is null or undefined, returning 'N/A'");
+                return 'N/A';
+            }
+            try {
+                const options = { 
+                    year: 'numeric', month: '2-digit', day: '2-digit', 
+                    hour12: false 
+                };
+                if (includeTime) {
+                    options.hour = '2-digit';
+                    options.minute = '2-digit';
+                    options.second = '2-digit';
+                }
+                let d = new Date(isoString);
+                if (isNaN(d.getTime())) { 
+                    if (DEBUG_MODE) console.warn("DEBUG: formatDateTime: Invalid date created from isoString:", isoString);
+                    return 'Invalid Date';
+                }
+                // Using en-CA to get YYYY-MM-DD format, then customizing time
+                let datePart = d.toLocaleDateString('en-CA', {year: 'numeric', month: '2-digit', day: '2-digit'});
+                if (includeTime) {
+                    let timePart = d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                    return `${datePart} ${timePart}`;
+                }
+                return datePart;
+            } catch (e) { 
+                console.error("ERROR: formatDateTime error for:", isoString, e); 
+                return isoString; 
+            }
+        }
+        function formatGap(milliseconds) { 
+            if (DEBUG_MODE) console.log("DEBUG: formatGap called with milliseconds:", milliseconds); 
+            if (milliseconds === null || isNaN(milliseconds) || milliseconds < 0) return 'N/A';
+            const seconds = Math.floor(milliseconds / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+
+            if (days > 0) return `${days}d ${hours % 24}h`;
+            if (hours > 0) return `${hours}h ${minutes % 60}m`;
+            if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+            return `${seconds}s`;
+        }
+        
+        async function fetchApi(endpoint, options = {}) { 
+            const url = `${API_BASE_URL}${endpoint}`;
+            if (DEBUG_MODE) console.log(`DEBUG: fetchApi - Starting request to ${url}`, options);
+            try {
+                const response = await fetch(url, options); 
+                const contentType = response.headers.get('Content-Type');
+                if (DEBUG_MODE) console.log(`DEBUG: fetchApi - Response from ${url}. Status: ${response.status}, OK: ${response.ok}, Content-Type: ${contentType}`);
+
+                if (!response.ok) {
+                    let errorData = { message: `HTTP Error: ${response.status} - ${response.statusText}` }; 
+                    if (contentType && contentType.includes('application/json')) {
+                        try {
+                            errorData = await response.json(); 
+                            if (DEBUG_MODE) console.log(`DEBUG: fetchApi - Parsed JSON error data from ${url}:`, errorData);
+                        } catch (e) {
+                            if (DEBUG_MODE) console.warn(`DEBUG: fetchApi - Could not parse JSON from error response for ${url}. Status: ${response.status}. Response text might follow.`);
+                            try {
+                                const textError = await response.text();
+                                if (DEBUG_MODE) console.warn(`DEBUG: fetchApi - Text error response: ${textError}`);
+                                errorData.message += ` (Server response: ${textError.substring(0,100)})`;
+                            } catch (textE) { /* ignore */ }
+                        }
+                    }
+                    const errorMsg = errorData.message || errorData.error || `HTTP Error: ${response.status} - ${response.statusText}`;
+                    console.error(`API Error Response (${url}): Status ${response.status}`, errorData); 
+                    showToast(errorMsg, 'error');
+                    throw new Error(errorMsg);
+                }
+
+                if (response.status === 204) { 
+                    if (DEBUG_MODE) console.log(`DEBUG: fetchApi - Received 204 No Content for ${url}. Returning empty array for /clusters or null for others.`);
+                    return endpoint === '/clusters' ? [] : null; 
+                }
+                
+                if (contentType && contentType.includes('application/json')) {
+                    const responseData = await response.json(); 
+                    if (DEBUG_MODE) console.log(`DEBUG: fetchApi - Successfully parsed JSON responseData for ${url}`, responseData); 
+                    if (endpoint === '/clusters') {
+                        return Array.isArray(responseData) ? responseData : [];
+                    }
+                    return responseData; 
+                } else {
+                    const textData = await response.text();
+                    if (DEBUG_MODE) console.log(`DEBUG: fetchApi - Received non-JSON response for ${url}. Body:`, textData);
+                    if (endpoint === '/clusters') {
+                        showToast('Failed to get cluster list from server (format error).', 'error');
+                        throw new Error('Invalid content type for /clusters endpoint');
+                    }
+                    return textData; 
+                }
+
+            } catch (error) { 
+                console.error(`DEBUG: API Call/Parse Error in fetchApi's catch (${url}):`, error.name, error.message, error.stack); 
+                const displayError = error.message && (error.message.includes("JSON.parse") || error.message.toLowerCase().includes("unexpected token")) 
+                                     ? "Server response format error" 
+                                     : (error.message || 'Network or server error occurred');
+                showToast(displayError, 'error');
+                throw error; 
+            }
+        }
+        
+        registerClusterFormEl.addEventListener('submit', async (event) => { 
+            event.preventDefault();
+            if (DEBUG_MODE) console.log("DEBUG: Register cluster form submitted."); 
+            const submitButton = registerClusterFormEl.querySelector('button[type="submit"]');
+            const originalHTML = submitButton.innerHTML; 
+            
+            const textNode = Array.from(submitButton.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim().startsWith('Register')); // More specific
+            if(textNode) textNode.textContent = ' Registering...';
+            else { 
+                const currentIcon = submitButton.querySelector('svg');
+                submitButton.innerHTML = ''; 
+                if(currentIcon) submitButton.appendChild(currentIcon.cloneNode(true)); 
+                submitButton.insertAdjacentText('beforeend', ' Registering...');
+            }
+            
+            const loader = document.createElement('div');
+            loader.className = 'loader';
+            submitButton.appendChild(loader);
+            submitButton.disabled = true;
+
+
+            const formData = new FormData(registerClusterFormEl);
+            const clusterData = {
+                name: formData.get('clusterName'),
+                connection_string: formData.get('connectionString'),
+                oplog_target_store_uri: formData.get('oplogTargetStoreUri'),
+                change_stream_target_db: formData.get('changeStreamTargetDb') || null 
+            };
+            if (DEBUG_MODE) console.log("DEBUG: Cluster data to be sent:", clusterData); 
+
+            try {
+                const result = await fetchApi('/clusters', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(clusterData)
+                });
+                if (DEBUG_MODE) console.log("DEBUG: Cluster registration API response:", result); 
+                showToast(`Cluster '${result.name}' registration requested. Collector starting...`, 'success');
+                registerClusterFormEl.reset();
+                if (DEBUG_MODE) console.log("DEBUG: Calling loadAndDisplayRegisteredClusters after registration.");
+                loadAndDisplayRegisteredClusters();
+                const statusTabButton = document.querySelector('.tab-button[onclick*="statusTab"]');
+                if (statusTabButton) statusTabButton.click(); 
+            } catch(error) {
+                if (DEBUG_MODE) console.error("DEBUG: Error during cluster registration:", error);
+            } finally {
+                submitButton.innerHTML = originalHTML; 
+                submitButton.disabled = false;
+            }
+        });
+
+        function getIntuitiveErrorMessage(errorMessage, status) { 
+            if (!errorMessage && status !== "error_resume_token_lost" && status !== "retrying_connection" && status !== "error_max_retries_reached") return '';
+            
+            if (status === "error_resume_token_lost") {
+                return "Error: Cannot resume stream (Resume Token lost/expired). 'Reset Oplog Store' required.";
+            }
+            if (status === "retrying_connection") {
+                return `Warning: Retrying source DB connection... (${errorMessage || 'Connection issue'})`;
+            }
+            if (status === "error_max_retries_reached") {
+                return "Error: Max connection retries to source DB reached (Collector stopped)";
+            }
+            if (status === "app_managed_running"){ 
+                return "Collector started (app check)";
+            }
+
+
+            if (errorMessage.includes("ChangeStreamFatalError") && (errorMessage.includes("Code: 280") || errorMessage.includes("ChangeStreamHistoryLost") || errorMessage.includes("NonResumableChangeStreamError"))) {
+                return "Error: Cannot resume stream (Resume Token lost or expired)";
+            }
+            if (errorMessage.includes("Oplog 데이터 저장소 연결 실패")) { // This was Korean
+                 return "Error: Failed to connect to Oplog Data Store";
+            }
+            if (errorMessage.includes("Collector script not found")){
+                return "Error: Collector script file not found";
+            }
+            if (errorMessage.includes("Collector process terminated unexpectedly")){
+                return "Error: Collector process terminated unexpectedly";
+            }
+             if (errorMessage.includes("Failed to clear Oplog Store")){
+                return "Error: Failed to clear Oplog Store";
+            }
+            return errorMessage.length > 70 ? errorMessage.substring(0, 70) + "..." : errorMessage; 
+        }
+
+        function createClustersTable(clusters) {
+            if (DEBUG_MODE) console.log("DEBUG: createClustersTable called with clusters:", clusters); 
+
+            if (!clusters || !Array.isArray(clusters) || clusters.length === 0) { 
+                noClustersMessageEl.style.display = 'block';
+                registeredClustersTableContainerEl.innerHTML = ''; 
+                registeredClustersTableContainerEl.appendChild(noClustersMessageEl);
+                if (DEBUG_MODE) console.log("DEBUG: createClustersTable: No clusters to display or clusters is not an array.");
+                return;
+            }
+            noClustersMessageEl.style.display = 'none';
+
+            let tableHtml = `
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 15%;">Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 20%;">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 20%;">First Oplog Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 20%;">Last Oplog Time</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%;">GAP (Lag)</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider actions-cell" style="width: 15%;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">`;
+
+            const now = new Date(); 
+
+            clusters.forEach((cluster, index) => {
+                if (DEBUG_MODE) console.log(`DEBUG: Processing cluster ${index} in createClustersTable:`, JSON.stringify(cluster, null, 2)); 
+                const statusInfo = cluster.collector_status || {};
+                const intuitiveError = getIntuitiveErrorMessage(statusInfo.error_message, statusInfo.status);
+                let statusText = statusInfo.status || 'N/A';
+                if (statusInfo.status === 'app_managed_running') {
+                    statusText = 'Collector started (app check)';
+                } else if (statusInfo.status === 'running_basic_check') {
+                    statusText = 'Collector running (basic check)';
+                }
+
+                const statusClass = (statusInfo.status || 'unknown').replace(/_/g, '-');
+
+                let statusCellHtml = `
+                    <div class="flex items-center">
+                        <span class="status-dot status-${statusClass}"></span>
+                        <span>${statusText}</span>
+                    </div>
+                `;
+                if (statusInfo.error_message && statusInfo.status !== 'retrying_connection' && statusInfo.status !== 'error_resume_token_lost') { 
+                    statusCellHtml += `<span class="error-message-summary text-xs text-red-600 mt-1" title="${statusInfo.error_message}">${intuitiveError}</span>`;
+                } else if (intuitiveError) { 
+                     statusCellHtml += `<span class="error-message-summary text-xs ${statusInfo.status === 'retrying_connection' ? 'text-amber-600' : 'text-red-600'} mt-1" title="${statusInfo.error_message || ''}">${intuitiveError}</span>`;
+                }
+                
+                if (DEBUG_MODE) console.log(`DEBUG: Cluster ${cluster.name} - first_oplog_time_utc from data:`, statusInfo.first_oplog_time_utc); 
+                const firstOplogTime = statusInfo.first_oplog_time_utc; 
+                const lastOplogTime = statusInfo.last_oplog_time_utc;
+                
+                let gapMilliseconds = null;
+                let gapFormatted = 'N/A';
+                let gapClass = '';
+
+                if (lastOplogTime) {
+                    gapMilliseconds = now.getTime() - new Date(lastOplogTime).getTime();
+                    if (DEBUG_MODE) console.log(`DEBUG: Cluster ${cluster.name} - typeof formatGap:`, typeof formatGap);
+                    if (typeof formatGap === 'function') {
+                        gapFormatted = formatGap(gapMilliseconds);
+                    } else {
+                        console.error("ERROR: formatGap is not defined or not a function here!");
+                        gapFormatted = "Error: formatGap N/A";
+                    }
+                    if (gapMilliseconds >= 600000) { 
+                        gapClass = 'gap-critical font-bold';
+                    } else if (gapMilliseconds >= 300000) { 
+                        gapClass = 'gap-warning';
+                    }
+                }
+
+                tableHtml += `
+                    <tr>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${cluster.name}<br><span class="text-xs text-gray-500">ID: ${cluster.id}</span></td>
+                        <td class="px-4 py-4 text-sm text-gray-500 status-cell">${statusCellHtml}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${formatDateTime(firstOplogTime)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${formatDateTime(lastOplogTime)}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500 ${gapClass}" id="gap-cell-${cluster.id}">${gapFormatted}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-sm font-medium actions-cell">
+                            <button class="btn btn-sm" data-id="${cluster.id}" onclick="startCollector('${cluster.id}', this)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" /></svg>
+                                Start
+                            </button>
+                            <button class="btn btn-sm" data-id="${cluster.id}" onclick="stopCollector('${cluster.id}', this)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M5.25 3A2.25 2.25 0 003 5.25v9.5A2.25 2.25 0 005.25 17h9.5A2.25 2.25 0 0017 14.75v-9.5A2.25 2.25 0 0014.75 3h-9.5z" /></svg>
+                                Stop
+                            </button>
+                            <button class="btn btn-sm" data-id="${cluster.id}" onclick="resetOplogStore('${cluster.id}', '${cluster.name}', this)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.204-4.97L3.86 3.86A1.5 1.5 0 016.002 6l.906.905a6.502 6.502 0 008.692 5.918l.468-.117a.75.75 0 01.85.33L19 15.896a.75.75 0 01-1.23.816l-1.928-2.41a.75.75 0 01.16-1.078l.61-.48zM6.25 10a3.75 3.75 0 107.5 0 3.75 3.75 0 00-7.5 0z" clip-rule="evenodd" /><path d="M6.002 6A1.5 1.5 0 013.86 3.86l2.255 2.255A3.993 3.993 0 006 6.5V10c0 .902.305 1.728.817 2.396L6 13.18V6z" /></svg>
+                                Reset Oplog
+                            </button>
+                            <button class="btn btn-sm" data-id="${cluster.id}" onclick="deleteCluster('${cluster.id}', '${cluster.name}', this)">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.58.197-2.348.365a.75.75 0 00-.5.746V16.5A2.75 2.75 0 005.75 19h8.5A2.75 2.75 0 0017 16.25V5.304a.75.75 0 00-.5-.746c-.768-.168-1.553-.288-2.348-.365V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clip-rule="evenodd" /></svg>
+                                Delete Cluster
+                            </button>
+                        </td>
+                    </tr>
+                    `; 
+            });
+            tableHtml += `</tbody></table>`;
+            registeredClustersTableContainerEl.innerHTML = tableHtml;
+            if (DEBUG_MODE) console.log("DEBUG: createClustersTable: Table HTML populated.");
+        }
+
+        function updateGlobalTime() {
+            if (globalCurrentTimeEl) {
+                const nowISO = new Date().toISOString();
+                if (DEBUG_MODE) console.log("DEBUG: updateGlobalTime - current ISO for formatting:", nowISO); 
+                globalCurrentTimeEl.textContent = formatDateTime(nowISO);
+            }
+        }
+
+
+        async function loadAndDisplayRegisteredClusters() { 
+            try {
+                if (DEBUG_MODE) console.log("DEBUG: loadAndDisplayRegisteredClusters - Attempting to fetch clusters...");
+                const clustersData = await fetchApi('/clusters'); 
+                if (DEBUG_MODE) console.log('DEBUG: loadAndDisplayRegisteredClusters - API call finished. Raw data received:', clustersData); 
+                
+                if (typeof clustersData === 'undefined') { 
+                    console.error("DEBUG: loadAndDisplayRegisteredClusters - fetchApi returned undefined! This is unexpected.");
+                    showToast("Error: Received undefined data from server.", "error");
+                    registeredClustersTableContainerEl.innerHTML = '<p class="text-red-500">Error loading cluster list (undefined data). Check console.</p>';
+                    return;
+                }
+                
+                const clusters = Array.isArray(clustersData) ? clustersData : [];
+                if (DEBUG_MODE) console.log('DEBUG: Fetched clusters for display (after assignment, ensured array):', clusters); 
+                
+                createClustersTable(clusters);
+                updateGlobalTime(); 
+            } catch (error) {
+                registeredClustersTableContainerEl.innerHTML = '<p class="text-red-500">Error loading cluster list. Check browser console and server logs.</p>';
+                if (DEBUG_MODE) console.error("DEBUG: Error caught in loadAndDisplayRegisteredClusters:", error.name, error.message, error.stack); 
+            }
+        }
+        
+        window.startCollector = async (clusterId, button) => { 
+            if (DEBUG_MODE) console.log(`DEBUG: startCollector called for clusterId: ${clusterId}`); 
+            const originalHTML = button.innerHTML;
+            const textNode = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+            if(textNode) textNode.textContent = ' Starting...';
+            const loader = createButtonLoader(button); // Loader is appended
+            try {
+                const result = await fetchApi(`/clusters/${clusterId}/start_collector`, { method: 'POST' });
+                showToast(result.message, 'info');
+                loadAndDisplayRegisteredClusters(); 
+            } finally {
+                removeButtonLoader(button, loader, originalHTML);
+            }
+        };
+        window.stopCollector = async (clusterId, button) => { 
+            if (DEBUG_MODE) console.log(`DEBUG: stopCollector called for clusterId: ${clusterId}`); 
+            const originalHTML = button.innerHTML;
+            const textNode = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+            if(textNode) textNode.textContent = ' Stopping...';
+            const loader = createButtonLoader(button);
+            try {
+                const result = await fetchApi(`/clusters/${clusterId}/stop_collector`, { method: 'POST' });
+                showToast(result.message, 'info');
+                loadAndDisplayRegisteredClusters(); 
+            } finally {
+                removeButtonLoader(button, loader, originalHTML);
+            }
+        };
+        window.resetOplogStore = async (clusterId, clusterName, button) => { 
+            if (DEBUG_MODE) console.log(`DEBUG: resetOplogStore called for clusterId: ${clusterId}`); 
+            if (!confirm(`Are you sure you want to reset the Oplog store for cluster '${clusterName}' (ID: ${clusterId}) and restart the Collector?\nThis will delete all stored Oplog data and the Resume Token for this cluster.\nThis action can lead to data loss for PITR!`)) {
+                return;
+            }
+            const originalHTML = button.innerHTML;
+            const textNode = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+            if(textNode) textNode.textContent = ' Resetting...';
+            const loader = createButtonLoader(button);
+            try {
+                const result = await fetchApi(`/clusters/${clusterId}/reset_oplog_store`, { method: 'POST' });
+                showToast(result.message, 'success');
+                loadAndDisplayRegisteredClusters(); 
+            } finally {
+                removeButtonLoader(button, loader, originalHTML);
+            }
+        };
+        window.deleteCluster = async (clusterId, clusterName, button) => { 
+            if (DEBUG_MODE) console.log(`DEBUG: deleteCluster called for clusterId: ${clusterId}`); 
+            if (!confirm(`Are you sure you want to delete cluster '${clusterName}' (ID: ${clusterId})?\nThis action will:\n  - Remove cluster registration from the management system.\n  - Stop any running Oplog Collector for this cluster.\n  - WIPE ALL OPLOG DATA AND RESUME TOKEN from its Oplog Data Store.\n\nThis action cannot be undone!`)) {
+                return;
+            }
+            const originalHTML = button.innerHTML;
+            const textNode = Array.from(button.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+            if(textNode) textNode.textContent = ' Deleting...';
+            const loader = createButtonLoader(button);
+            try {
+                const result = await fetchApi(`/clusters/${clusterId}`, { method: 'DELETE' });
+                showToast(result.message, 'success');
+                loadAndDisplayRegisteredClusters(); 
+            } finally {
+                removeButtonLoader(button, loader, originalHTML);
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const statusTabButton = document.querySelector('.tab-button[onclick*="statusTab"]');
+            if (statusTabButton) {
+                statusTabButton.click();
+            } else {
+                const statusTabContent = document.getElementById('statusTab');
+                if (statusTabContent) statusTabContent.style.display = 'block';
+            }
+            
+            loadAndDisplayRegisteredClusters();
+            updateGlobalTime(); 
+            setInterval(() => {
+                loadAndDisplayRegisteredClusters(); 
+                updateGlobalTime(); 
+            }, 15000); 
+        });
+    </script>
+</body>
+</html>
+
