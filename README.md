@@ -1,26 +1,50 @@
-# **MongoDB Oplog Management System**
+# MongoDB Oplog Collector & Management System
 
-## **1\. Overview**
+## 1. Overview
 
-This project provides a web-based management tool for continuously collecting MongoDB oplogs from source clusters. It allows users to register MongoDB source clusters, monitor the status of their respective Oplog Collectors, and manage these collector processes. The collected oplogs are intended to be used for Point-in-Time Recovery (PITR), although the utility for performing the PITR is managed in a separate repository and is not part of this system.
+This project provides a web-based management tool and a background collector script designed for continuously capturing MongoDB oplogs (operation logs) from your source clusters. The primary purpose of collecting these oplogs is to enable Point-in-Time Recovery (PITR) capabilities when used in conjunction with a base backup (like a volume snapshot or a `mongodump`).
+
+While this system manages the collection and storage of oplogs, the actual process of applying these oplogs to a restored backup for PITR would typically be handled by a separate utility (e.g., the [pitr_cli tool](https://github.com/MongoBuddy/pitr_cli), or custom scripts).
 
 The core components included in this repository are:
 
-* **Web UI (`index.html`)**: A browser-based interface to register source clusters and manage/monitor Oplog Collectors.  
-* **Backend Server (`app.py`)**: A Flask-based server that:  
-  * Manages Oplog Collector subprocesses.  
-  * Provides an API for the Web UI.  
-  * Stores cluster registration details and collector status in a Central Metadata MongoDB.  
-* **Oplog Collector (`scripts/oplog_collector.py`)**: A Python script, run as a daemon for each registered source cluster, which:  
-  * Watches the change stream of the source MongoDB.  
-  * Collects oplog entries.  
-  * Stores these entries and resume tokens in a separate Oplog Data Store MongoDB.  
-  * Reports its status to the Central Metadata DB.  
-* **`requirements.txt`**: Lists the necessary Python dependencies.
+* **Web UI (`index.html`)**: A browser-based interface to register new MongoDB source clusters that need oplog collection, monitor the status of their Oplog Collectors, and manage these collector processes.
 
-## **2\. Key Features**
+* **Backend Server (`app.py`)**: A Flask-based server that:
 
-### **2.1. Web UI (`index.html` \+ `app.py`)**
+  * Manages the lifecycle of Oplog Collector subprocesses.
+
+  * Provides an API for the Web UI to interact with.
+
+  * Stores cluster registration details and collector status in a Central Metadata MongoDB.
+
+* **Oplog Collector (`scripts/oplog_collector.py`)**: A Python script that runs as a daemon for each registered source cluster. It:
+
+  * Connects to the source MongoDB cluster and watches its change stream (oplog).
+
+  * Captures various database operations (inserts, updates, deletes, DDL changes, etc.).
+
+  * Stores these captured oplog entries, along with resume tokens, into a dedicated Oplog Data Store (another MongoDB instance).
+
+  * Periodically reports its operational status to the Central Metadata DB.
+
+* **`requirements.txt`**: Lists the necessary Python dependencies for the backend server.
+
+## 2. Purpose of Oplog Collection for PITR
+
+Point-in-Time Recovery (PITR) allows you to restore a database to a very specific moment in time, typically between your regular full backups. This is crucial for recovering from accidental data deletion or corruption that occurred after your last full backup.
+
+The process generally involves:
+
+1. **Restoring a Base Backup**: First, you restore your database from a known good full backup (e.g., an LVM snapshot, AWS EBS snapshot, or a `mongodump` taken at time `T_snapshot`). This brings your database to the state it was in at `T_snapshot`.
+
+2. **Applying Oplogs (Rolling Forward)**: The `oplog_collector.py` script in this project continuously captures all changes (oplogs) happening on your source database *after* `T_snapshot` and stores them. To reach a specific recovery point `T_recovery_point` (where `T_snapshot < T_recovery_point`), you would use a separate utility to apply these stored oplogs from `T_snapshot` up to `T_recovery_point` onto the restored base backup.
+
+This system provides the essential first part: **reliable and continuous collection of oplogs**.
+
+## **3\. Key Features**
+
+### **3.1. Web UI (`index.html` \+ `app.py`)**
 
 * **Source Cluster Registration**:  
 ![image](https://github.com/user-attachments/assets/ee865744-7d09-4bd8-b90e-7182359d1387)
@@ -46,7 +70,7 @@ The core components included in this repository are:
   * Both `app.py` and `scripts/oplog_collector.py` implement log rotation. Log files are rotated when they reach a certain size (default 100MB), and a configurable number of backup log files are kept (default 10).  
   * Log file names follow the pattern: `app.log`, `app.log.1`, ... and `oplog_collector_<cluster_name>.log`, `oplog_collector_<cluster_name>.log.1`, ...
 
-### **2.2. Oplog Collector (`scripts/oplog_collector.py`)**
+### **3.2. Oplog Collector (`scripts/oplog_collector.py`)**
 
 * Watches the change stream of a specified source MongoDB cluster (or a specific database within it), using `show_expanded_events=True` for MongoDB 6.0+.  
 * Collects oplog entries for various operation types (`insert`, `update`, `delete`, `replace`, `drop`, `rename`, `dropDatabase`, `invalidate`, `createIndexes`, `dropIndexes`, `create`, `modify`).  
@@ -57,7 +81,7 @@ The core components included in this repository are:
 * Handles `SIGINT` and `SIGTERM` signals for graceful shutdown, updating its status.  
 * Log level can be controlled via the `OPLOG_LOG_LEVEL` environment variable (default: `INFO`; available: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). Log rotation is implemented.
 
-## **3\. System Architecture**
+## **4\. System Architecture**
 
 1. **Source MongoDB Cluster(s)**: The original databases generating oplogs.  
 2. **Oplog Collector (`scripts/oplog_collector.py`)**: One daemon process per source cluster, collecting oplogs.  
@@ -67,7 +91,7 @@ The core components included in this repository are:
 5. **Backend Server (`app.py`)**: Handles UI API requests, manages collector subprocesses, and interacts with the Central Metadata DB.  
 6. **Web UI (`index.html`)**: The front-end interface for users.
 
-## **4\. Directory Structure**
+## **5\. Directory Structure**
 
 It is assumed your project has the following structure:
 
@@ -83,15 +107,15 @@ It is assumed your project has the following structure:
     └── oplog_collector_<cluster_name>.log
 ```
 
-## **5\. Setup and Installation**
+## **6\. Setup and Installation**
 
-### **5.1. Prerequisites**
+### **6.1. Prerequisites**
 
 * Python 3.7+  
 * MongoDB (for Source Clusters, Oplog Data Store, and Central Metadata DB)  
 * `pip` (Python package installer)
 
-### **5.2. Install Python Libraries**
+### **6.2. Install Python Libraries**
 
 In your project root directory, ensure you have a `requirements.txt` file with the following content:
 ```
@@ -103,7 +127,7 @@ Then, install the dependencies:
 ```
 pip install -r requirements.txt
 ```
-### **5.3. Environment Variables**
+### **6.3. Environment Variables**
 
 The application and scripts use environment variables for configuration.
 
@@ -114,7 +138,7 @@ The application and scripts use environment variables for configuration.
     (Default: `INFO`. Options: `DEBUG`, `INFO`, `WARNING`, `ERROR`,`CRITICAL`)  
 
 
-### **5.4. Running the Application**
+### **6.4. Running the Application**
 
 1. Start the Backend Server (`app.py`):  
    Navigate to your project root directory and run:
@@ -129,14 +153,14 @@ The application and scripts use environment variables for configuration.
 ```
    Then, open your web browser and go to `http://localhost:8000/index.html`. The JavaScript in `index.html` is configured to make API calls to the Flask backend running on port 4999\.
 
-## **6\. Log Management**
+## **7\. Log Management**
 
 * **`app.py`**: Logs to `logs/app.log` with rotation (default 100MB per file, 10 backups). Log level is controlled by `APP_LOG_LEVEL` (default `INFO`).  
 * **`scripts/oplog_collector.py`**: Logs to `logs/oplog_collector_<cluster_name>.log` with rotation (parameters set by `app.py` via environment variables, defaulting to 100MB and 10 backups). Log level is controlled by `OPLOG_LOG_LEVEL` (default `INFO`, can be overridden by `APP_LOG_LEVEL` when launched by `app.py`).
 
 To enable `DEBUG` level logging for troubleshooting, set the respective environment variable before starting `app.py` (e.g., `export APP_LOG_LEVEL=DEBUG` on Linux/macOS or `set APP_LOG_LEVEL=DEBUG` on Windows).
 
-## **7\. Oplog Data Store Retention (TTL Index)**
+## **8\. Oplog Data Store Retention (TTL Index)**
 
 To prevent the Oplog Data Store from growing indefinitely, it's crucial to implement a data retention policy. A common way to achieve this in MongoDB is by using a Time-To-Live (TTL) index on a date field in your oplog documents.
 
@@ -166,7 +190,7 @@ Important Notes for TTL Indexes:
 * TTL indexes are efficient for removing large amounts of data but are not instant. MongoDB's background TTL thread runs periodically (default every 60 seconds) to remove expired documents.  
 * Choose an `expireAfterSeconds` value that aligns with your organization's data retention policies and PITR requirements. You need to retain oplogs long enough to cover the period between your oldest usable base backup and your desired recovery points.  
 
-## **8\. Troubleshooting Notes**
+## **9\. Troubleshooting Notes**
 
 * If a collector is in an error state, check its specific log file in the `logs/` directory for details.  
 * The `error_resume_token_lost` status indicates that the collector's last known position in the source oplog is no longer available. This requires a manual "Reset Oplog Store" action via the UI.  
