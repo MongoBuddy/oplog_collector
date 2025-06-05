@@ -11,21 +11,14 @@ The core components included in this repository are:
 * **Web UI (`index.html`)**: A browser-based interface to register new MongoDB source clusters that need oplog collection, monitor the status of their Oplog Collectors, and manage these collector processes.
 
 * **Backend Server (`app.py`)**: A Flask-based server that:
-
   * Manages the lifecycle of Oplog Collector subprocesses.
-
   * Provides an API for the Web UI to interact with.
-
   * Stores cluster registration details and collector status in a Central Metadata MongoDB.
 
 * **Oplog Collector (`scripts/oplog_collector.py`)**: A Python script that runs as a daemon for each registered source cluster. It:
-
   * Connects to the source MongoDB cluster and watches its change stream (oplog).
-
   * Captures various database operations (inserts, updates, deletes, DDL changes, etc.).
-
   * Stores these captured oplog entries, along with resume tokens, into a dedicated Oplog Data Store (another MongoDB instance).
-
   * Periodically reports its operational status to the Central Metadata DB.
 
 * **`requirements.txt`**: Lists the necessary Python dependencies for the backend server.
