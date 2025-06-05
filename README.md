@@ -136,7 +136,37 @@ The application and scripts use environment variables for configuration.
 
 To enable `DEBUG` level logging for troubleshooting, set the respective environment variable before starting `app.py` (e.g., `export APP_LOG_LEVEL=DEBUG` on Linux/macOS or `set APP_LOG_LEVEL=DEBUG` on Windows).
 
-## **7\. Troubleshooting Notes**
+## **7\. Oplog Data Store Retention (TTL Index)**
+
+To prevent the Oplog Data Store from growing indefinitely, it's crucial to implement a data retention policy. A common way to achieve this in MongoDB is by using a Time-To-Live (TTL) index on a date field in your oplog documents.
+
+The `oplog_collector.py` script saves a `wall` field (UTC datetime) with each oplog entry. You can create a TTL index on this field in each `oplogs_<cluster_name>` collection.
+
+Example: Setting a 30-day TTL on Oplogs
+
+Connect to your Oplog Data Store MongoDB using the `mongosh` and execute the following command for each cluster's oplog collection you want to manage. Replace `oplogs_myClusterName` with the actual collection name.
+```
+// Connect to the database where your oplog collections are stored  
+// use oplog_prod_db; 
+
+// For each cluster's oplog collection:  
+db.oplogs_myClusterName.createIndex(  
+  { "wall": 1 },  
+  { expireAfterSeconds: 2592000 } // 30 days in seconds (30 * 24 * 60 * 60)  
+);
+```
+Explanation:
+
+* `{ "wall": 1 }`: Creates an ascending index on the `wall` field.  
+* `{ expireAfterSeconds: 2592000 }`: Configures the index as a TTL index. Documents will be automatically deleted 2,592,000 seconds (30 days) after the time specified in their `wall` field.
+
+Important Notes for TTL Indexes:
+
+* The field used for TTL must be a BSON Date type or an array of BSON Date types. The wall field is stored as a UTC datetime object by the collector, which is compatible.  
+* TTL indexes are efficient for removing large amounts of data but are not instant. MongoDB's background TTL thread runs periodically (default every 60 seconds) to remove expired documents.  
+* Choose an `expireAfterSeconds` value that aligns with your organization's data retention policies and PITR requirements. You need to retain oplogs long enough to cover the period between your oldest usable base backup and your desired recovery points.  
+
+## **8\. Troubleshooting Notes**
 
 * If a collector is in an error state, check its specific log file in the `logs/` directory for details.  
 * The `error_resume_token_lost` status indicates that the collector's last known position in the source oplog is no longer available. This requires a manual "Reset Oplog Store" action via the UI.  
